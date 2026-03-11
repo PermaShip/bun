@@ -428,6 +428,127 @@ function getGlobalOrigin() {}
 const caches = {};
 
 /**
+ * An in-memory implementation of the CacheStore interface from undici v7.
+ * See: https://github.com/nodejs/undici/blob/main/docs/docs/api/CacheStore.md
+ */
+class MemoryCacheStore {
+  #maxSize;
+  #maxCount;
+  #maxEntrySize;
+  #size = 0;
+  #entries = new Map();
+
+  /**
+   * @param {Object} [options]
+   * @param {number} [options.maxSize] Maximum total size of all cached entries in bytes
+   * @param {number} [options.maxCount] Maximum number of cached entries
+   * @param {number} [options.maxEntrySize] Maximum size of a single cached entry in bytes
+   */
+  constructor(options = {}) {
+    const { maxSize = Infinity, maxCount = Infinity, maxEntrySize = Infinity } = options;
+    this.#maxSize = maxSize;
+    this.#maxCount = maxCount;
+    this.#maxEntrySize = maxEntrySize;
+  }
+
+  get isFull() {
+    return this.#size >= this.#maxSize || this.#entries.size >= this.#maxCount;
+  }
+
+  get size() {
+    return this.#size;
+  }
+
+  /**
+   * @param {import('undici').CacheKey} key
+   * @returns {import('undici').CacheValue | undefined}
+   */
+  get(key) {
+    const entry = this.#entries.get(this.#buildKey(key));
+    if (!entry) return undefined;
+    if (entry.deleteAt != null && entry.deleteAt <= Date.now()) {
+      this.#size -= entry.size;
+      this.#entries.delete(this.#buildKey(key));
+      return undefined;
+    }
+    return entry.value;
+  }
+
+  /**
+   * @param {import('undici').CacheKey} key
+   * @param {import('undici').CacheValue} value
+   * @returns {import('stream').Writable | undefined}
+   */
+  createWriteStream(key, value) {
+    const store = this;
+    const keyStr = this.#buildKey(key);
+
+    let body = [];
+    let entrySize = 0;
+
+    const writable = new StreamModule.Writable({
+      write(chunk, encoding, callback) {
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding);
+        entrySize += buf.byteLength;
+        if (entrySize > store.#maxEntrySize) {
+          // Entry too large — abort without storing
+          this.destroy();
+          callback();
+          return;
+        }
+        body.push(buf);
+        callback();
+      },
+      final(callback) {
+        if (!this.destroyed) {
+          const fullValue = { ...value, body: Buffer.concat(body) };
+          const size = entrySize;
+          // Evict if needed to fit maxSize
+          while (store.#size + size > store.#maxSize && store.#entries.size > 0) {
+            const firstKey = store.#entries.keys().next().value;
+            const firstEntry = store.#entries.get(firstKey);
+            store.#size -= firstEntry.size;
+            store.#entries.delete(firstKey);
+          }
+          if (store.#entries.size >= store.#maxCount) {
+            // Evict oldest entry to make room
+            const firstKey = store.#entries.keys().next().value;
+            const firstEntry = store.#entries.get(firstKey);
+            store.#size -= firstEntry.size;
+            store.#entries.delete(firstKey);
+          }
+          const ttl = value.cacheControlDirectives?.["max-age"];
+          const deleteAt = ttl != null ? Date.now() + ttl * 1000 : null;
+          store.#entries.set(keyStr, { value: fullValue, size, deleteAt });
+          store.#size += size;
+        }
+        callback();
+      },
+    });
+
+    return writable;
+  }
+
+  /**
+   * @param {import('undici').CacheKey} key
+   */
+  delete(key) {
+    const keyStr = this.#buildKey(key);
+    const entry = this.#entries.get(keyStr);
+    if (entry) {
+      this.#size -= entry.size;
+      this.#entries.delete(keyStr);
+    }
+  }
+
+  #buildKey(key) {
+    return `${key.method}:${key.url}`;
+  }
+}
+
+const cacheStores = { MemoryCacheStore };
+
+/**
  * Builds a connector function for making network connections
  * @param {Object} [options] Configuration options for the connector
  * @param {boolean} [options.rejectUnauthorized] Whether to reject unauthorized SSL/TLS connections
@@ -455,6 +576,7 @@ const moduleExports = {
   BalancedPool,
   buildConnector,
   caches,
+  cacheStores,
   Client,
   CloseEvent,
   connect,

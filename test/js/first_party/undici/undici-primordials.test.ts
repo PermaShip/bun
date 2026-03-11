@@ -58,6 +58,7 @@ it("undici", () => {
     "WebSocket",
     "buildConnector",
     "caches",
+    "cacheStores",
     "connect",
     "createRedirectInterceptor",
     "default",
