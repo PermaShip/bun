@@ -614,6 +614,16 @@ pub fn spawnMaybeSync(
             spawn_options.deinit();
             switch (err.getErrno()) {
                 .ACCES, .NOENT, .PERM, .ISDIR, .NOTDIR => |errno| {
+                    // If cwd was specified and the error could be from a failed chdir
+                    // (ENOENT or NOTDIR), stat the cwd to determine which path failed.
+                    if (cwd.len > 0 and (errno == .NOENT or errno == .NOTDIR)) {
+                        if (bun.sys.stat(cwd) == .err) {
+                            // The cwd doesn't exist - report error with cwd path and chdir syscall
+                            var systemerror = bun.sys.Error.fromCode(errno, .chdir).withPath(cwd).toSystemError();
+                            if (errno == .NOENT) systemerror.errno = -bun.sys.UV_E.NOENT;
+                            return globalThis.throwValue(systemerror.toErrorInstance(globalThis));
+                        }
+                    }
                     const display_path: [:0]const u8 = if (argv.items.len > 0 and argv.items[0] != null)
                         std.mem.sliceTo(argv.items[0].?, 0)
                     else
