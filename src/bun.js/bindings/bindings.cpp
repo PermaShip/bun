@@ -5062,6 +5062,9 @@ restart:
             if ((entry.attributes() & (PropertyAttribute::Function)) == 0 && (entry.attributes() & (PropertyAttribute::Builtin)) != 0) {
                 return true;
             }
+            if ((entry.attributes() & PropertyAttribute::DontEnum) != 0) {
+                return true;
+            }
             auto* prop = entry.key();
 
             if (prop == propertyNames->constructor
@@ -5142,9 +5145,9 @@ restart:
 
         while (iterating && !(iterating == globalObject->objectPrototype() || iterating == globalObject->functionPrototype() || (iterating->inherits<JSGlobalProxy>() && jsCast<JSGlobalProxy*>(iterating)->target() != globalObject)) && prototypeCount++ < 5) {
             if constexpr (nonIndexedOnly) {
-                iterating->getOwnNonIndexPropertyNames(globalObject, properties, DontEnumPropertiesMode::Include);
+                iterating->getOwnNonIndexPropertyNames(globalObject, properties, DontEnumPropertiesMode::Exclude);
             } else {
-                iterating->methodTable()->getOwnPropertyNames(iterating, globalObject, properties, DontEnumPropertiesMode::Include);
+                iterating->methodTable()->getOwnPropertyNames(iterating, globalObject, properties, DontEnumPropertiesMode::Exclude);
             }
 
             RETURN_IF_EXCEPTION(scope, void());
@@ -5304,7 +5307,7 @@ extern "C" [[ZIG_EXPORT(nothrow)]] bool JSC__isBigIntInInt64Range(JSC::EncodedJS
     JSC::PropertyNameArrayBuilder properties(vm, PropertyNameMode::StringsAndSymbols, PrivateSymbolMode::Exclude);
     {
 
-        JSC::JSObject::getOwnPropertyNames(object, globalObject, properties, DontEnumPropertiesMode::Include);
+        JSC::JSObject::getOwnPropertyNames(object, globalObject, properties, DontEnumPropertiesMode::Exclude);
         if (scope.exception()) [[unlikely]] {
             (void)scope.tryClearException();
             return;
