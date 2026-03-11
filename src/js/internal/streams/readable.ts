@@ -1028,6 +1028,8 @@ Readable.prototype.on = function (ev, fn) {
   const res = Stream.prototype.on.$call(this, ev, fn);
   const state = this._readableState;
 
+  if (!state) return res;
+
   if (ev === "data") {
     state[kState] |= kDataListening;
 
@@ -1061,6 +1063,8 @@ Readable.prototype.removeListener = function (ev, fn) {
 
   const res = Stream.prototype.removeListener.$call(this, ev, fn);
 
+  if (!state) return res;
+
   if (ev === "readable") {
     // We need to check if there is someone still listening to
     // readable and reset the state. However this needs to happen
@@ -1080,7 +1084,7 @@ Readable.prototype.off = Readable.prototype.removeListener;
 Readable.prototype.removeAllListeners = function (ev) {
   const res = Stream.prototype.removeAllListeners.$apply(this, arguments);
 
-  if (ev === "readable" || ev === undefined) {
+  if (this._readableState && (ev === "readable" || ev === undefined)) {
     // We need to check if there is someone still listening to
     // readable and reset the state. However this needs to happen
     // after readable has been emitted but before I/O (nextTick) to
