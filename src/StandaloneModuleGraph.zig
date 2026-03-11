@@ -698,6 +698,8 @@ pub const StandaloneModuleGraph = struct {
                     },
                 ).unwrap() catch |e| {
                     Output.prettyErrorln("<r><red>error<r><d>:<r> failed to open temporary file to copy bun into\n{}", .{e});
+                    // copyFile succeeded but open failed; remove the orphaned temp file
+                    _ = bun.windows.kernel32.DeleteFileW(out.ptr);
                     return bun.invalid_fd;
                 };
 
@@ -710,7 +712,10 @@ pub const StandaloneModuleGraph = struct {
                 if (Syscall.clonefile(self_exe, zname) == .result) {
                     switch (Syscall.open(zname, bun.O.RDWR | bun.O.CLOEXEC, 0)) {
                         .result => |res| break :brk res,
-                        .err => {},
+                        .err => {
+                            // clonefile succeeded but open failed; remove the orphaned temp file
+                            _ = Syscall.unlink(zname);
+                        },
                     }
                 }
             }
@@ -1157,6 +1162,8 @@ pub const StandaloneModuleGraph = struct {
             // Move the file using MoveFileExW
             if (bun.windows.kernel32.MoveFileExW(temp_buf_u16[0..temp_w.len :0].ptr, dest_buf_u16[0..dest_w.len :0].ptr, bun.windows.MOVEFILE_COPY_ALLOWED | bun.windows.MOVEFILE_REPLACE_EXISTING | bun.windows.MOVEFILE_WRITE_THROUGH) == bun.windows.FALSE) {
                 const err = bun.windows.Win32Error.get();
+                // fd is already closed; delete the orphaned temp file
+                _ = bun.windows.kernel32.DeleteFileW(temp_buf_u16[0..temp_w.len :0].ptr);
                 if (err.toSystemErrno()) |sys_err| {
                     if (sys_err == .EISDIR) {
                         return CompileResult.failFmt("{s} is a directory. Please choose a different --outfile or delete the directory", .{outfile});
@@ -1196,11 +1203,15 @@ pub const StandaloneModuleGraph = struct {
         const temp_location = bun.getFdPath(fd, &buf) catch |err| {
             return CompileResult.failFmt("failed to get path for fd: {s}", .{@errorName(err)});
         };
+        // Null-terminate the temp path in buf so we can unlink it on error even if toPosixPath fails
+        buf[temp_location.len] = 0;
         const temp_posix = std.posix.toPosixPath(temp_location) catch |err| {
+            _ = Syscall.unlink(buf[0..temp_location.len :0]);
             return CompileResult.failFmt("path too long: {s}", .{@errorName(err)});
         };
         const outfile_basename = std.fs.path.basename(outfile);
         const outfile_posix = std.posix.toPosixPath(outfile_basename) catch |err| {
+            _ = Syscall.unlink(buf[0..temp_location.len :0]);
             return CompileResult.failFmt("outfile name too long: {s}", .{@errorName(err)});
         };
 
