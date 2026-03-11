@@ -1327,7 +1327,20 @@ pub fn LowerDecorators(
                             super_index = index;
                             break;
                         }
-                        const insert_at = if (super_index) |j| j + 1 else 0;
+                        var insert_at = if (super_index) |j| j + 1 else 0;
+                        // Skip TypeScript parameter property assignments (this.name = param)
+                        // already inserted by visitClass. Decorator initializers must run after
+                        // parameter properties are set.
+                        while (insert_at < body_stmts.items.len) {
+                            const s = body_stmts.items[insert_at];
+                            if (s.data != .s_expr) break;
+                            const val = s.data.s_expr.value;
+                            if (val.data != .e_binary) break;
+                            if (val.data.e_binary.op != .bin_assign) break;
+                            if (val.data.e_binary.left.data != .e_dot) break;
+                            if (val.data.e_binary.left.data.e_dot.target.data != .e_this) break;
+                            insert_at += 1;
+                        }
                         body_stmts.insertSlice(insert_at, constructor_inject_stmts.items) catch unreachable;
                         func.func.body.stmts = body_stmts.items;
                         found_constructor = true;
