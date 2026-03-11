@@ -506,7 +506,7 @@ function spawnSync(file, args, options) {
   options.killSignal = sanitizeKillSignal(options.killSignal);
 
   const stdio = options.stdio || "pipe";
-  const bunStdio = getBunStdioFromOptions(stdio);
+  const [bunStdio] = getBunStdioFromOptions(stdio);
 
   var { input } = options;
   if (input) {
@@ -1222,6 +1222,34 @@ class ChildProcess extends EventEmitter {
     }
   }
 
+  #pipeStream(index: number, stream: any) {
+    const handle = this.#handle;
+    if (!handle) return;
+
+    if (index === 0) {
+      // stdin: pipe user's Readable into child's stdin
+      const childStdin = handle.stdin;
+      if (childStdin) {
+        const writable = require("internal/fs/streams").writableFromFileSink(childStdin);
+        stream.pipe(writable);
+      }
+    } else if (index === 1 || index === 2) {
+      // stdout/stderr: pipe child's output into user's Writable
+      const childOutput = handle[fdToStdioName(index)];
+      if (childOutput) {
+        const readable = require("internal/streams/native-readable").constructNativeReadable(childOutput, {
+          encoding: this.#encoding,
+        });
+        this.#closesNeeded++;
+        readable.once("close", () => this.#maybeClose());
+        readable.pipe(stream);
+      }
+    }
+
+    // Mark as handled so childProcess.stdin/stdout/stderr returns null
+    this.#stdioOptions[index] = "stream-piped";
+  }
+
   #stdin;
   #stdout;
   #stderr;
@@ -1294,7 +1322,7 @@ class ChildProcess extends EventEmitter {
     const serialization = options.serialization || "json";
 
     const stdio = options.stdio || ["pipe", "pipe", "pipe"];
-    const bunStdio = getBunStdioFromOptions(stdio);
+    const [bunStdio, streamPipes] = getBunStdioFromOptions(stdio);
 
     const has_ipc = $isJSArray(stdio) && stdio.includes("ipc");
 
@@ -1366,6 +1394,11 @@ class ChildProcess extends EventEmitter {
       this.pid = this.#handle.pid;
 
       $debug("ChildProcess: spawn", this.pid, spawnargs);
+
+      // Set up stream forwarding for stdio streams that had no open fd
+      for (const { index, stream } of streamPipes) {
+        this.#pipeStream(index, stream);
+      }
 
       process.nextTick(() => {
         this.emit("spawn");
@@ -1607,15 +1640,11 @@ function nodeToBun(item: string, index: number): string | number | null | NodeJS
   if (typeof item === "number") {
     return item;
   }
-  if (isNodeStreamReadable(item)) {
+  if (isNodeStreamReadable(item) || isNodeStreamWritable(item)) {
     if (Object.hasOwn(item, "fd") && typeof item.fd === "number") return item.fd;
     if (item._handle && typeof item._handle.fd === "number") return item._handle.fd;
-    throw new Error(`TODO: stream.Readable stdio @ ${index}`);
-  }
-  if (isNodeStreamWritable(item)) {
-    if (Object.hasOwn(item, "fd") && typeof item.fd === "number") return item.fd;
-    if (item._handle && typeof item._handle.fd === "number") return item._handle.fd;
-    throw new Error(`TODO: stream.Writable stdio @ ${index}`);
+    // Stream without an open fd — will be piped after the process spawns
+    return "pipe";
   }
   const result = nodeToBunLookup[item];
   if (result === undefined) {
@@ -1674,7 +1703,7 @@ function getBunStdioFromOptions(stdio) {
   // overlapped -- same as pipe on Unix based systems
   // inherit -- 'inherit': equivalent to ['inherit', 'inherit', 'inherit'] or [0, 1, 2]
   // ignore -- > /dev/null, more or less same as null option for Bun.spawn stdio
-  // TODO: Stream -- use this stream
+  // Stream (with fd) -- use the fd directly; (without fd) -- pipe after spawn
   // number -- used as FD
   // null, undefined: Use default value. Not same as ignore, which is Bun.spawn null.
   // null/undefined: For stdio fds 0, 1, and 2 (in other words, stdin, stdout, and stderr) a pipe is created. For fd 3 and up, the default is 'ignore'
@@ -1689,9 +1718,19 @@ function getBunStdioFromOptions(stdio) {
   // overlapped -> pipe
   // ignore -> null
   // inherit -> inherit (stdin/stdout/stderr)
-  // Stream -> throw err for now
-  const bunStdio = normalizedStdio.map(nodeToBun);
-  return bunStdio;
+  // Stream (with fd) -> fd number
+  // Stream (without fd) -> pipe (forwarded after spawn)
+  const streamPipes: { index: number; stream: any }[] = [];
+  const bunStdio = normalizedStdio.map((item, index) => {
+    const result = nodeToBun(item, index);
+    // Track stream objects without an open fd that need pipe-forwarding after spawn
+    if (result === "pipe" && item !== null && typeof item === "object" &&
+        (isNodeStreamReadable(item) || isNodeStreamWritable(item))) {
+      streamPipes.push({ index, stream: item });
+    }
+    return result;
+  });
+  return [bunStdio, streamPipes];
 }
 
 function normalizeStdio(stdio): string[] {
