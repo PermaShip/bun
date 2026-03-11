@@ -73,6 +73,7 @@ pub const update_params: []const ParamType = &(shared_params ++ [_]ParamType{
     clap.parseParam("-i, --interactive                     Show an interactive list of outdated packages to select for update") catch unreachable,
     clap.parseParam("--filter <STR>...                     Update packages for the matching workspaces") catch unreachable,
     clap.parseParam("-r, --recursive                       Update packages in all workspaces") catch unreachable,
+    clap.parseParam("-E, --exact                           Add the exact version instead of the ^range") catch unreachable,
     clap.parseParam("<POS> ...                             \"name\" of packages to update") catch unreachable,
 });
 
@@ -1055,6 +1056,7 @@ pub fn parse(allocator: std.mem.Allocator, comptime subcommand: Subcommand) !Com
         cli.latest = args.flag("--latest");
         cli.interactive = args.flag("--interactive");
         cli.recursive = args.flag("--recursive");
+        cli.exact = args.flag("--exact");
     }
 
     const specified_backend: ?PackageInstall.Method = brk: {

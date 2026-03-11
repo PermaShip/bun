@@ -482,3 +482,111 @@ it("should support --recursive flag", async () => {
   // Should recognize the flag (either process workspaces or show error about missing lockfile)
   expect(out + err).toMatch(/bun update|missing lockfile|nothing to update/);
 });
+
+it("should update to exact version with --exact flag", async () => {
+  const urls: string[] = [];
+  const registry = {
+    "0.0.3": {},
+    latest: "0.0.3",
+  };
+  setHandler(dummyRegistry(urls, registry));
+  await writeFile(
+    join(package_dir, "package.json"),
+    JSON.stringify({
+      name: "foo",
+      dependencies: {
+        baz: "^0.0.3",
+      },
+    }),
+  );
+
+  // Install first to create a lockfile
+  const { stderr: stderr1, exited: exited1 } = spawn({
+    cmd: [bunExe(), "install", "--linker=hoisted"],
+    cwd: package_dir,
+    stdout: "pipe",
+    stdin: "pipe",
+    stderr: "pipe",
+    env,
+  });
+  const err1 = await new Response(stderr1).text();
+  expect(err1).not.toContain("error:");
+  expect(await exited1).toBe(0);
+
+  urls.length = 0;
+
+  // Update with --exact flag
+  const { stdout, stderr, exited } = spawn({
+    cmd: [bunExe(), "update", "--exact", "baz", "--linker=hoisted"],
+    cwd: package_dir,
+    stdout: "pipe",
+    stdin: "pipe",
+    stderr: "pipe",
+    env,
+  });
+  const err = await new Response(stderr).text();
+  expect(err).not.toContain("error:");
+  expect(await exited).toBe(0);
+
+  // Verify package.json has exact version (no ^ prefix)
+  expect(await file(join(package_dir, "package.json")).json()).toEqual({
+    name: "foo",
+    dependencies: {
+      baz: "0.0.3",
+    },
+  });
+});
+
+it("should update to exact version with -E short flag", async () => {
+  const urls: string[] = [];
+  const registry = {
+    "0.0.3": {},
+    latest: "0.0.3",
+  };
+  setHandler(dummyRegistry(urls, registry));
+  await writeFile(
+    join(package_dir, "package.json"),
+    JSON.stringify({
+      name: "foo",
+      dependencies: {
+        baz: "^0.0.3",
+      },
+    }),
+  );
+
+  // Install first to create a lockfile
+  const { stderr: stderr1, exited: exited1 } = spawn({
+    cmd: [bunExe(), "install", "--linker=hoisted"],
+    cwd: package_dir,
+    stdout: "pipe",
+    stdin: "pipe",
+    stderr: "pipe",
+    env,
+  });
+  const err1 = await new Response(stderr1).text();
+  expect(err1).not.toContain("error:");
+  expect(await exited1).toBe(0);
+
+  urls.length = 0;
+
+  // Update with -E short flag
+  const { stdout, stderr, exited } = spawn({
+    cmd: [bunExe(), "update", "-E", "baz", "--linker=hoisted"],
+    cwd: package_dir,
+    stdout: "pipe",
+    stdin: "pipe",
+    stderr: "pipe",
+    env,
+  });
+  const err = await new Response(stderr).text();
+  expect(err).not.toContain("error:");
+  expect(await exited).toBe(0);
+
+  // Verify package.json has exact version (no ^ prefix)
+  expect(await file(join(package_dir, "package.json")).json()).toEqual({
+    name: "foo",
+    dependencies: {
+      baz: "0.0.3",
+    },
+  });
+});
