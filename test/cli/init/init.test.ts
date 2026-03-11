@@ -296,6 +296,46 @@ import path from "path";
     expect(fs.existsSync(path.join(temp, "src/components/ui"))).toBe(true);
   }, 30_000);
 
+  test("bun init generates files with consistent tab indentation", async () => {
+    // Regression test for https://github.com/oven-sh/bun/issues/19319
+    // package.json and tsconfig.json should both use tabs for indentation
+    const temp = tempDirWithFiles("bun-init-consistent-indentation", {});
+
+    const { exited } = Bun.spawn({
+      cmd: [bunExe(), "init", "-y"],
+      cwd: temp,
+      stdio: ["ignore", "inherit", "inherit"],
+      env: bunEnv,
+    });
+
+    expect(await exited).toBe(0);
+
+    const packageJsonText = fs.readFileSync(path.join(temp, "package.json"), "utf8");
+    const tsconfigText = fs.readFileSync(path.join(temp, "tsconfig.json"), "utf8");
+
+    // Both files should use tabs, not spaces, for indentation
+    // A tab-indented line would have a tab character as the first character after a newline
+    const packageJsonLines = packageJsonText.split("\n");
+    const tsconfigLines = tsconfigText.split("\n");
+
+    const packageJsonIndentedLines = packageJsonLines.filter(line => line.length > 0 && (line[0] === " " || line[0] === "\t"));
+    const tsconfigIndentedLines = tsconfigLines.filter(line => line.length > 0 && (line[0] === " " || line[0] === "\t"));
+
+    // Both files should have indented lines
+    expect(packageJsonIndentedLines.length).toBeGreaterThan(0);
+    expect(tsconfigIndentedLines.length).toBeGreaterThan(0);
+
+    // All indented lines in package.json should start with a tab
+    for (const line of packageJsonIndentedLines) {
+      expect(line[0]).toBe("\t");
+    }
+
+    // All indented lines in tsconfig.json should start with a tab
+    for (const line of tsconfigIndentedLines) {
+      expect(line[0]).toBe("\t");
+    }
+  }, 30_000);
+
   test("bun init --minimal only creates package.json and tsconfig.json", async () => {
     // Regression test for https://github.com/oven-sh/bun/issues/26050
     // --minimal should not create .cursor/, CLAUDE.md, .gitignore, or README.md
