@@ -156,6 +156,14 @@ pub fn whichWin(buf: *bun.WPathBuffer, path: []const u8, cwd: []const u8, bin: [
         return null;
     }
 
+    // On Windows, cmd.exe searches the current directory before PATH for bare command names.
+    // Replicate this behavior so that scripts like "WebRecovery.bat" in package.json can be
+    // found when the .bat file lives in the project root (cwd).
+    if (searchBinInPath(buf, path_buf, cwd, bin, check_windows_extensions)) |bin_path| {
+        bun.path.posixToPlatformInPlace(u16, bin_path);
+        return bin_path;
+    }
+
     // iterate over system path delimiter
     var path_iter = std.mem.tokenizeScalar(u8, path, ';');
     while (path_iter.next()) |segment_part| {
