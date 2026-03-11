@@ -589,3 +589,137 @@ Ran 1 test across 1 file."
 `);
   expect(result.exitCode).toBe(0);
 });
+test("coverageThreshold - plural keys fail when coverage is below threshold", () => {
+  const dir = tempDirWithFiles("cov-threshold-plural-fail", {
+    "bunfig.toml": `
+[test]
+coverageThreshold = { functions = 1.0 }
+`,
+    "src.ts": `
+export function covered() { return 1; }
+export function uncovered() { return 2; }
+covered();
+`,
+    "test.test.ts": `
+import { test } from "bun:test";
+import { covered } from "./src";
+test("t", () => { covered(); });
+`,
+  });
+
+  const result = Bun.spawnSync([bunExe(), "test", "--coverage"], {
+    cwd: dir,
+    env: { ...bunEnv },
+    stdio: [null, null, "pipe"],
+  });
+
+  expect(result.exitCode).toBe(1);
+});
+
+test("coverageThreshold - singular keys fail when coverage is below threshold", () => {
+  const dir = tempDirWithFiles("cov-threshold-singular-fail", {
+    "bunfig.toml": `
+[test]
+coverageThreshold = { function = 1.0 }
+`,
+    "src.ts": `
+export function covered() { return 1; }
+export function uncovered() { return 2; }
+covered();
+`,
+    "test.test.ts": `
+import { test } from "bun:test";
+import { covered } from "./src";
+test("t", () => { covered(); });
+`,
+  });
+
+  const result = Bun.spawnSync([bunExe(), "test", "--coverage"], {
+    cwd: dir,
+    env: { ...bunEnv },
+    stdio: [null, null, "pipe"],
+  });
+
+  expect(result.exitCode).toBe(1);
+});
+
+test("coverageThreshold - singular keys pass when coverage meets threshold", () => {
+  const dir = tempDirWithFiles("cov-threshold-singular-pass", {
+    "bunfig.toml": `
+[test]
+coverageThreshold = { function = 0.0, line = 0.0 }
+`,
+    "src.ts": `
+export function covered() { return 1; }
+export function uncovered() { return 2; }
+covered();
+`,
+    "test.test.ts": `
+import { test } from "bun:test";
+import { covered } from "./src";
+test("t", () => { covered(); });
+`,
+  });
+
+  const result = Bun.spawnSync([bunExe(), "test", "--coverage"], {
+    cwd: dir,
+    env: { ...bunEnv },
+    stdio: [null, null, "pipe"],
+  });
+
+  expect(result.exitCode).toBe(0);
+});
+
+test("coverageThreshold - lcov-only reporter fails when coverage is below threshold", () => {
+  const dir = tempDirWithFiles("cov-threshold-lcov-fail", {
+    "bunfig.toml": `
+[test]
+coverageThreshold = { functions = 1.0 }
+`,
+    "src.ts": `
+export function covered() { return 1; }
+export function uncovered() { return 2; }
+covered();
+`,
+    "test.test.ts": `
+import { test } from "bun:test";
+import { covered } from "./src";
+test("t", () => { covered(); });
+`,
+  });
+
+  const result = Bun.spawnSync([bunExe(), "test", "--coverage", "--coverage-reporter", "lcov"], {
+    cwd: dir,
+    env: { ...bunEnv },
+    stdio: [null, null, "pipe"],
+  });
+
+  expect(result.exitCode).toBe(1);
+});
+
+test("coverageThreshold - lcov-only reporter passes when coverage meets threshold", () => {
+  const dir = tempDirWithFiles("cov-threshold-lcov-pass", {
+    "bunfig.toml": `
+[test]
+coverageThreshold = { functions = 0.0 }
+`,
+    "src.ts": `
+export function covered() { return 1; }
+export function uncovered() { return 2; }
+covered();
+`,
+    "test.test.ts": `
+import { test } from "bun:test";
+import { covered } from "./src";
+test("t", () => { covered(); });
+`,
+  });
+
+  const result = Bun.spawnSync([bunExe(), "test", "--coverage", "--coverage-reporter", "lcov"], {
+    cwd: dir,
+    env: { ...bunEnv },
+    stdio: [null, null, "pipe"],
+  });
+
+  expect(result.exitCode).toBe(0);
+});

@@ -345,19 +345,19 @@ pub const Bunfig = struct {
                         }
 
                         try this.expect(expr, .e_object);
-                        if (expr.get("functions")) |functions| {
+                        if (expr.get("functions") orelse expr.get("function")) |functions| {
                             try this.expect(functions, .e_number);
                             this.ctx.test_options.coverage.fractions.functions = functions.data.e_number.value;
                             this.ctx.test_options.coverage.fail_on_low_coverage = true;
                         }
 
-                        if (expr.get("lines")) |lines| {
+                        if (expr.get("lines") orelse expr.get("line")) |lines| {
                             try this.expect(lines, .e_number);
                             this.ctx.test_options.coverage.fractions.lines = lines.data.e_number.value;
                             this.ctx.test_options.coverage.fail_on_low_coverage = true;
                         }
 
-                        if (expr.get("statements")) |stmts| {
+                        if (expr.get("statements") orelse expr.get("statement")) |stmts| {
                             try this.expect(stmts, .e_number);
                             this.ctx.test_options.coverage.fractions.stmts = stmts.data.e_number.value;
                             this.ctx.test_options.coverage.fail_on_low_coverage = true;
