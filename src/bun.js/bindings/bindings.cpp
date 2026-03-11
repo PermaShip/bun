@@ -5098,6 +5098,12 @@ restart:
             if (!propertyValue)
                 return true;
 
+            // When iterating prototype properties (not the object itself), skip function values.
+            // This matches Node.js behavior where class methods are not shown in console.log output.
+            // We only skip non-accessor callables; accessors (getters/setters) are still shown.
+            if (objectToUse != object && !(entry.attributes() & PropertyAttribute::Accessor) && propertyValue.isCallable())
+                return true;
+
             anyHits = true;
             JSC::EnsureStillAliveScope ensureStillAliveScope(propertyValue);
 
@@ -5221,6 +5227,12 @@ restart:
                 bool isPrivate = property.isPrivateName();
 
                 if (isPrivate && !JSC::Options::showPrivateScriptsInStackTraces())
+                    continue;
+
+                // When iterating prototype properties (not the object itself), skip function values.
+                // This matches Node.js behavior where class methods are not shown in console.log output.
+                // We only skip non-accessor callables; accessors (getters/setters) are still shown.
+                if (iterating != object && !(slot.attributes() & PropertyAttribute::Accessor) && propertyValue.isCallable())
                     continue;
 
                 iter(globalObject, arg2, &key, JSC::JSValue::encode(propertyValue), property.isSymbol(), isPrivate);
