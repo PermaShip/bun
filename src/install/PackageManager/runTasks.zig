@@ -570,9 +570,10 @@ pub fn runTasks(
                 }
             },
             .extract, .local_tarball => {
+                var should_return_to_pool = true;
                 defer {
                     switch (task.tag) {
-                        .extract => manager.preallocated_network_tasks.put(task.request.extract.network),
+                        .extract => if (should_return_to_pool) manager.preallocated_network_tasks.put(task.request.extract.network),
                         else => {},
                     }
                 }
@@ -589,6 +590,35 @@ pub fn runTasks(
 
                 if (task.status == .fail) {
                     const err = task.err orelse error.TarballFailedToExtract;
+
+                    // Retry integrity check failures by re-downloading the tarball.
+                    // The response_buffer was freed by the extract task (PackageManagerTask.zig:150);
+                    // we must reinitialize it before re-enqueuing the network task.
+                    if (err == error.IntegrityCheckFailed and task.tag == .extract) retry: {
+                        const network = task.request.extract.network;
+                        if (network.retried >= manager.options.max_retry_count) break :retry;
+
+                        network.retried += 1;
+                        network.response_buffer = bun.MutableString.initEmpty(manager.allocator);
+                        network.response = .{};
+                        should_return_to_pool = false;
+                        manager.enqueueNetworkTask(network);
+
+                        manager.log.addWarningFmt(
+                            null,
+                            logger.Loc.Empty,
+                            manager.allocator,
+                            "<r><yellow>warn:<r> Integrity check failed for <b>{s}@{f}<r>. Retrying {d}/{d}...",
+                            .{
+                                alias,
+                                resolution.fmt(manager.lockfile.buffers.string_bytes.items, .auto),
+                                network.retried,
+                                manager.options.max_retry_count,
+                            },
+                        ) catch unreachable;
+
+                        continue;
+                    }
 
                     if (@TypeOf(callbacks.onPackageDownloadError) != void) {
                         callbacks.onPackageDownloadError(
