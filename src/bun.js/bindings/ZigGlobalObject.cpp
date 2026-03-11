@@ -219,6 +219,10 @@
 #include <unistd.h>
 #endif
 
+#if !OS(WINDOWS)
+#include <unicode/uloc.h>
+#endif
+
 using namespace Bun;
 
 BUN_DECLARE_HOST_FUNCTION(Bun__NodeUtil__jsParseArgs);
@@ -277,6 +281,59 @@ extern "C" void JSCInitialize(const char* envp[], size_t envc, void (*onCrash)(c
 
         std::set_terminate([]() { Zig__GlobalObject__onCrash(); });
         WTF::initializeMainThread();
+
+#if !OS(WINDOWS)
+        // Set the ICU default locale from environment variables so that Intl APIs
+        // (DateTimeFormat, Collator, NumberFormat, etc.) use the system locale by default.
+        // Priority order: LC_ALL > LC_CTYPE > LANG (standard Unix convention).
+        if (envc > 0) {
+            static const struct {
+                const char* prefix;
+                size_t prefix_len;
+            } locale_vars[] = {
+                { "LC_ALL=", 7 },
+                { "LC_CTYPE=", 9 },
+                { "LANG=", 5 },
+            };
+
+            // For each priority level, scan envp to find the first matching variable
+            for (const auto& var : locale_vars) {
+                bool found = false;
+                for (size_t i = 0; i < envc; i++) {
+                    const char* env = envp[i];
+                    if (env == nullptr) continue;
+                    if (strncmp(env, var.prefix, var.prefix_len) != 0) continue;
+
+                    const char* value = env + var.prefix_len;
+                    if (value[0] == '\0') continue; // empty value, skip
+
+                    // Skip "C" and "POSIX" which mean no locale
+                    if ((value[0] == 'C' && value[1] == '\0') ||
+                        strcmp(value, "POSIX") == 0) {
+                        found = true; // found but skip setting
+                        break;
+                    }
+
+                    // Copy locale and strip charset suffix (.UTF-8) and modifier (@euro)
+                    char locale_buf[256];
+                    size_t j = 0;
+                    for (; j < sizeof(locale_buf) - 1 && value[j] != '\0' && value[j] != '.' && value[j] != '@'; j++) {
+                        locale_buf[j] = value[j];
+                    }
+                    locale_buf[j] = '\0';
+
+                    if (j > 0) {
+                        UErrorCode status = U_ZERO_ERROR;
+                        uloc_setDefault(locale_buf, &status);
+                        // Ignore ICU errors — if the locale is invalid, ICU will use its own fallback
+                    }
+                    found = true;
+                    break;
+                }
+                if (found) break;
+            }
+        }
+#endif
 
 #if ASAN_ENABLED && OS(LINUX)
         {
