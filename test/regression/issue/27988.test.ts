@@ -6,8 +6,6 @@
 import { test, expect } from "bun:test";
 import { bunEnv, bunExe, isWindows, normalizeBunSnapshot, tempDir } from "harness";
 import { which } from "bun";
-import { join } from "node:path";
-import { writeFileSync, chmodSync } from "node:fs";
 
 test.skipIf(!isWindows)("bun run finds bare .bat file in cwd (package.json script)", async () => {
   using dir = tempDir("issue-27988-bat", {
