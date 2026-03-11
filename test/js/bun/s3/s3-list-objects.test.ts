@@ -1054,6 +1054,35 @@ describe("S3 - List Objects", () => {
     });
   });
 
+  it("Should return checksumAlgorithm (not checksumAlgorithme) in contents", async () => {
+    using server = createBunServer(async => {
+      return new Response(
+        `<?xml version="1.0" encoding="UTF-8"?><ListBucketResult>
+    <Contents>
+        <Key>some/file.txt</Key>
+        <ChecksumAlgorithm>CRC32</ChecksumAlgorithm>
+    </Contents>
+        </ListBucketResult>`,
+        {
+          headers: {
+            "Content-Type": "application/xml",
+          },
+          status: 200,
+        },
+      );
+    });
+
+    const client = new S3Client({
+      ...options,
+      endpoint: server.url.href,
+    });
+
+    const res = await client.list();
+
+    expect(res.contents![0].checksumAlgorithm).toBe("CRC32");
+    expect((res.contents![0] as any).checksumAlgorithme).toBeUndefined();
+  });
+
   it("Should throw error when no creds is found from instance method", async () => {
     const client = new S3Client();
 
