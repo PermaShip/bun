@@ -216,6 +216,38 @@ pub const InstallCompletionsCommand = struct {
 
             switch (shell) {
                 .fish => {
+                    // Priority 1: $XDG_DATA_HOME/fish/vendor_completions.d (create if missing)
+                    // Per fish documentation, third-party software should use vendor_completions.d
+                    if (bun.env_var.XDG_DATA_HOME.get()) |data_dir| {
+                        vendor: {
+                            var paths = [_]string{ data_dir, "./fish/vendor_completions.d" };
+                            completions_dir = resolve_path.joinAbsString(cwd, &paths, .auto);
+                            if (std.fs.openDirAbsolute(completions_dir, .{})) |dir| {
+                                break :found dir;
+                            } else |_| {}
+                            var data_handle = std.fs.openDirAbsolute(data_dir, .{}) catch break :vendor;
+                            defer data_handle.close();
+                            data_handle.makePath("fish/vendor_completions.d") catch break :vendor;
+                            break :found std.fs.openDirAbsolute(completions_dir, .{}) catch break :vendor;
+                        }
+                    }
+
+                    // Priority 2: $HOME/.local/share/fish/vendor_completions.d (create if missing)
+                    if (bun.env_var.HOME.get()) |home_dir| {
+                        vendor: {
+                            var paths = [_]string{ home_dir, "./.local/share/fish/vendor_completions.d" };
+                            completions_dir = resolve_path.joinAbsString(cwd, &paths, .auto);
+                            if (std.fs.openDirAbsolute(completions_dir, .{})) |dir| {
+                                break :found dir;
+                            } else |_| {}
+                            var home_handle = std.fs.openDirAbsolute(home_dir, .{}) catch break :vendor;
+                            defer home_handle.close();
+                            home_handle.makePath(".local/share/fish/vendor_completions.d") catch break :vendor;
+                            break :found std.fs.openDirAbsolute(completions_dir, .{}) catch break :vendor;
+                        }
+                    }
+
+                    // Priority 3: $XDG_CONFIG_HOME/fish/completions (only if exists)
                     if (bun.env_var.XDG_CONFIG_HOME.get()) |config_dir| {
                         outer: {
                             var paths = [_]string{ config_dir, "./fish/completions" };
@@ -225,22 +257,21 @@ pub const InstallCompletionsCommand = struct {
                         }
                     }
 
-                    if (bun.env_var.XDG_DATA_HOME.get()) |data_dir| {
-                        outer: {
-                            var paths = [_]string{ data_dir, "./fish/completions" };
-                            completions_dir = resolve_path.joinAbsString(cwd, &paths, .auto);
-
-                            break :found std.fs.openDirAbsolute(completions_dir, .{}) catch
-                                break :outer;
-                        }
-                    }
-
+                    // Priority 4: $HOME/.config/fish/completions (only if exists)
                     if (bun.env_var.HOME.get()) |home_dir| {
                         outer: {
                             var paths = [_]string{ home_dir, "./.config/fish/completions" };
                             completions_dir = resolve_path.joinAbsString(cwd, &paths, .auto);
                             break :found std.fs.openDirAbsolute(completions_dir, .{}) catch
                                 break :outer;
+                        }
+                    }
+
+                    // Priority 5: system vendor completions (Linux)
+                    if (!Environment.isMac) {
+                        outer: {
+                            completions_dir = "/usr/share/fish/vendor_completions.d";
+                            break :found std.fs.openDirAbsolute("/usr/share/fish/vendor_completions.d", .{}) catch break :outer;
                         }
                     }
 
