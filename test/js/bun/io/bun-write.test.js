@@ -528,6 +528,55 @@ const IS_UV_FS_COPYFILE_DISABLED =
     expect(text).toBe("0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n");
   }, 25000);
 
+  describe("Bun.write with empty Response body", () => {
+    // Regression test for https://github.com/oven-sh/bun/issues/6827
+    // Bun.write("ok.txt", new Response("")) must create the file.
+    // The bug: std.fs.path.dirname("ok.txt") returns null (no directory
+    // separator), and the old code did `orelse break :err` which rejected
+    // the promise without creating the file.
+    it("creates bare-named file (no directory separator) with empty Response", async () => {
+      using dir = tempDir("bun-write-empty-response-bare", {});
+      await using proc = Bun.spawn({
+        cmd: [bunExe(), "-e", "await Bun.write('ok.txt', new Response('')); console.log('ok');"],
+        env: bunEnv,
+        cwd: String(dir),
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
+      expect(stdout.trim()).toBe("ok");
+      expect(exitCode).toBe(0);
+      expect(fs.existsSync(path.join(String(dir), "ok.txt"))).toBe(true);
+      expect(fs.readFileSync(path.join(String(dir), "ok.txt"), "utf8")).toBe("");
+    });
+
+    it("creates file in a nested path (mkdir) with empty Response", async () => {
+      using tmpbase = tempDir("bun-write-empty-response-nested", {});
+      const filename = path.join(tmpbase, "sub", "dir", "ok.txt");
+      await Bun.write(filename, new Response(""));
+      expect(fs.existsSync(filename)).toBe(true);
+      expect(fs.readFileSync(filename, "utf8")).toBe("");
+    });
+
+    it("creates file at absolute path with empty Response", async () => {
+      using tmpbase = tempDir("bun-write-empty-response-abs", {});
+      const filename = path.join(tmpbase, "empty-body.txt");
+      await Bun.write(filename, new Response(""));
+      expect(fs.existsSync(filename)).toBe(true);
+      expect(fs.readFileSync(filename, "utf8")).toBe("");
+    });
+
+    it("truncates existing file with empty Response", async () => {
+      using tmpbase = tempDir("bun-write-empty-response-trunc", {
+        "existing.txt": "some existing content",
+      });
+      const filename = path.join(tmpbase, "existing.txt");
+      await Bun.write(filename, new Response(""));
+      expect(fs.existsSync(filename)).toBe(true);
+      expect(fs.readFileSync(filename, "utf8")).toBe("");
+    });
+  });
+
   if (isWindows && !IS_UV_FS_COPYFILE_DISABLED) {
     it("Bun.write() without uv_fs_copyfile", async () => {
       const { exited } = Bun.spawn({
