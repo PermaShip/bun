@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { bunEnv, bunExe, ospath } from "harness";
-import Module, { _nodeModulePaths, builtinModules, createRequire, isBuiltin, wrap } from "module";
+import Module, { _nodeModulePaths, builtinModules, createRequire, findPackageJSON, isBuiltin, wrap } from "module";
 import path from "path";
 
 describe.concurrent("node-module-module", () => {
@@ -218,6 +218,58 @@ describe.concurrent("node-module-module", () => {
     expect(stdout.trim()).toBe("pass");
     expect(await proc.exited).toBe(0);
   });
+  describe("findPackageJSON", () => {
+    test("is a function", () => {
+      expect(typeof findPackageJSON).toBe("function");
+    });
+
+    test("returns undefined for no arguments", () => {
+      expect(findPackageJSON()).toBeUndefined();
+    });
+
+    test("returns undefined for null input", () => {
+      expect(findPackageJSON(null)).toBeUndefined();
+    });
+
+    test("returns undefined for undefined input", () => {
+      expect(findPackageJSON(undefined)).toBeUndefined();
+    });
+
+    test("returns undefined for nonexistent path", () => {
+      expect(findPackageJSON("/this/path/does/not/exist/at/all")).toBeUndefined();
+    });
+
+    test("finds package.json from file URL", () => {
+      const result = findPackageJSON(import.meta.url);
+      expect(typeof result).toBe("string");
+      expect(result.endsWith("package.json")).toBe(true);
+    });
+
+    test("finds package.json from absolute path", () => {
+      const result = findPackageJSON(import.meta.path);
+      expect(typeof result).toBe("string");
+      expect(result.endsWith("package.json")).toBe(true);
+    });
+
+    test("finds package.json from absolute directory path", () => {
+      const result = findPackageJSON(import.meta.dir);
+      expect(typeof result).toBe("string");
+      expect(result.endsWith("package.json")).toBe(true);
+    });
+
+    test("finds package.json with relative specifier and file:// base", () => {
+      const result = findPackageJSON(".", import.meta.url);
+      expect(typeof result).toBe("string");
+      expect(result.endsWith("package.json")).toBe(true);
+    });
+
+    test("finds package.json with relative specifier and absolute base", () => {
+      const result = findPackageJSON(".", import.meta.path);
+      expect(typeof result).toBe("string");
+      expect(result.endsWith("package.json")).toBe(true);
+    });
+  });
+
   test.each(["no args", "--access-early"])("children, %s", async arg => {
     await using proc = Bun.spawn({
       cmd: [bunExe(), path.join(import.meta.dir, "children-fixture/a.cjs"), arg],

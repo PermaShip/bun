@@ -20,6 +20,8 @@
 #include "headers.h"
 #include "ErrorCode.h"
 
+#include <sys/stat.h>
+
 #include "GeneratedNodeModuleModule.h"
 #include "ZigGeneratedClasses.h"
 
@@ -39,6 +41,7 @@ JSC_DECLARE_HOST_FUNCTION(jsFunctionResolveFileName);
 JSC_DECLARE_HOST_FUNCTION(jsFunctionResolveLookupPaths);
 JSC_DECLARE_HOST_FUNCTION(jsFunctionSyncBuiltinExports);
 JSC_DECLARE_HOST_FUNCTION(jsFunctionWrap);
+JSC_DECLARE_HOST_FUNCTION(jsFunctionFindPackageJSON);
 
 JSC_DECLARE_CUSTOM_GETTER(getterRequireFunction);
 JSC_DECLARE_CUSTOM_SETTER(setterRequireFunction);
@@ -887,6 +890,171 @@ JSC_DEFINE_HOST_FUNCTION(jsFunctionGetCompileCacheDir,
     return JSC::JSValue::encode(JSC::jsUndefined());
 }
 
+// Implementation of module.findPackageJSON(specifier[, base])
+// https://nodejs.org/api/module.html#modulefindpackagejsonspecifier-base
+JSC_DEFINE_HOST_FUNCTION(jsFunctionFindPackageJSON,
+    (JSGlobalObject* globalObject,
+        JSC::CallFrame* callFrame))
+{
+    auto& vm = JSC::getVM(globalObject);
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
+    // Return undefined for missing or invalid inputs — do not throw
+    if (callFrame->argumentCount() < 1) {
+        return JSC::JSValue::encode(JSC::jsUndefined());
+    }
+
+    JSC::JSValue specifierArg = callFrame->argument(0);
+    if (specifierArg.isUndefinedOrNull()) {
+        return JSC::JSValue::encode(JSC::jsUndefined());
+    }
+
+    WTF::String specifier = specifierArg.toWTFString(globalObject);
+    if (scope.exception()) {
+        scope.clearException();
+        return JSC::JSValue::encode(JSC::jsUndefined());
+    }
+
+    if (specifier.isEmpty()) {
+        return JSC::JSValue::encode(JSC::jsUndefined());
+    }
+
+    WTF::String resolvedPath;
+
+    if (specifier.startsWith("file://"_s)) {
+        // file:// URL — convert to filesystem path
+        WTF::URL url(specifier);
+        if (!url.isValid() || !url.protocolIsFile()) {
+            return JSC::JSValue::encode(JSC::jsUndefined());
+        }
+        resolvedPath = url.fileSystemPath();
+    } else if (isAbsolutePath(specifier)) {
+        // Absolute path — use directly
+        resolvedPath = specifier;
+    } else {
+        // Relative path (starts with '.') or bare specifier — resolve via module resolver
+        JSC::JSValue baseArg = callFrame->argument(1);
+        JSC::JSValue fromValue;
+
+        if (!baseArg.isUndefinedOrNull()) {
+            WTF::String base = baseArg.toWTFString(globalObject);
+            if (scope.exception()) {
+                scope.clearException();
+                return JSC::JSValue::encode(JSC::jsUndefined());
+            }
+            if (base.startsWith("file://"_s)) {
+                WTF::URL baseUrl(base);
+                if (!baseUrl.isValid() || !baseUrl.protocolIsFile()) {
+                    return JSC::JSValue::encode(JSC::jsUndefined());
+                }
+                fromValue = JSC::jsString(vm, baseUrl.fileSystemPath());
+            } else {
+                fromValue = JSC::jsString(vm, base);
+            }
+        } else {
+            fromValue = JSC::jsEmptyString(vm);
+        }
+
+        auto result = JSC::JSValue::decode(
+            Bun__resolveSync(globalObject,
+                JSC::JSValue::encode(specifierArg),
+                JSC::JSValue::encode(fromValue),
+                false, true));
+        if (scope.exception()) {
+            scope.clearException();
+            return JSC::JSValue::encode(JSC::jsUndefined());
+        }
+        if (!result.isString()) {
+            return JSC::JSValue::encode(JSC::jsUndefined());
+        }
+        resolvedPath = result.toWTFString(globalObject);
+        if (scope.exception()) {
+            scope.clearException();
+            return JSC::JSValue::encode(JSC::jsUndefined());
+        }
+    }
+
+    if (resolvedPath.isEmpty()) {
+        return JSC::JSValue::encode(JSC::jsUndefined());
+    }
+
+    // Determine the starting directory from the resolved path
+    WTF::String dir;
+    {
+        auto utf8Path = resolvedPath.utf8();
+        struct stat st;
+        if (::stat(utf8Path.data(), &st) == 0 && S_ISDIR(st.st_mode)) {
+            // Path is a directory — start here
+            dir = resolvedPath;
+        } else {
+            // Strip the filename component to get its directory
+            size_t lastSlash = resolvedPath.reverseFind('/');
+#if OS(WINDOWS)
+            size_t lastBackslash = resolvedPath.reverseFind('\\');
+            if (lastBackslash != WTF::notFound &&
+                (lastSlash == WTF::notFound || lastBackslash > lastSlash)) {
+                lastSlash = lastBackslash;
+            }
+#endif
+            if (lastSlash == WTF::notFound) {
+                return JSC::JSValue::encode(JSC::jsUndefined());
+            }
+            dir = lastSlash == 0 ? "/"_s : resolvedPath.substring(0, lastSlash);
+        }
+    }
+
+    // Remove trailing separator from dir (normalize), but keep root "/" as-is
+    while (dir.length() > 1 && (dir.endsWith('/') || dir.endsWith('\\'))) {
+        dir = dir.substring(0, dir.length() - 1);
+    }
+
+    // Walk up the directory tree looking for package.json
+    while (!dir.isEmpty()) {
+        // Build the package.json path for this directory level
+        WTF::String pkgPath;
+#if OS(WINDOWS)
+        pkgPath = makeString(dir, "\\package.json"_s);
+#else
+        if (dir == "/"_s) {
+            pkgPath = "/package.json"_s;
+        } else {
+            pkgPath = makeString(dir, "/package.json"_s);
+        }
+#endif
+
+        struct stat st;
+        auto utf8Pkg = pkgPath.utf8();
+        if (::stat(utf8Pkg.data(), &st) == 0 && S_ISREG(st.st_mode)) {
+            return JSC::JSValue::encode(JSC::jsString(vm, pkgPath));
+        }
+
+        // Move up one directory level
+        size_t slash = dir.reverseFind('/');
+#if OS(WINDOWS)
+        size_t backslash = dir.reverseFind('\\');
+        if (backslash != WTF::notFound &&
+            (slash == WTF::notFound || backslash > slash)) {
+            slash = backslash;
+        }
+#endif
+        if (slash == WTF::notFound) {
+            break;
+        }
+        if (slash == 0) {
+            if (dir.length() == 1) {
+                // Already at root "/"
+                break;
+            }
+            // Parent is root "/"
+            dir = "/"_s;
+        } else {
+            dir = dir.substring(0, slash);
+        }
+    }
+
+    return JSC::JSValue::encode(JSC::jsUndefined());
+}
+
 static JSValue getModuleObject(VM& vm, JSObject* moduleObject)
 {
     return moduleObject;
@@ -910,6 +1078,7 @@ builtinModules          getBuiltinModulesObject           PropertyCallback
 constants               getConstantsObject                PropertyCallback
 createRequire           jsFunctionNodeModuleCreateRequire Function 1
 enableCompileCache      jsFunctionEnableCompileCache      Function 0
+findPackageJSON         jsFunctionFindPackageJSON         Function 2
 findSourceMap           Bun__JSSourceMap__find           Function 1
 getCompileCacheDir      jsFunctionGetCompileCacheDir      Function 0
 globalPaths             getGlobalPathsObject              PropertyCallback
