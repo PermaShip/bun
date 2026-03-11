@@ -114,7 +114,8 @@ if (isWindows) {
   });
 }
 
-test("Bun.which does not look in the current directory for bins", async () => {
+test("Bun.which does not look in the current directory for bins (POSIX)", async () => {
+  if (isWindows) return; // Windows intentionally searches CWD before PATH — see test below
   const cwd = process.cwd();
   const dir = tempDirWithFiles("which", {
     "some_program_name": "#!/usr/bin/env sh\necho FAIL\nexit 0\n",
@@ -122,12 +123,25 @@ test("Bun.which does not look in the current directory for bins", async () => {
   });
   process.chdir(dir);
   try {
-    if (!isWindows) {
-      await $`chmod +x ./some_program_name`;
-    }
-
+    await $`chmod +x ./some_program_name`;
     expect(which("some_program_name")).toBe(null);
     expect((await $`some_program_name`).exitCode).not.toBe(0);
+  } finally {
+    process.chdir(cwd);
+  }
+});
+
+test("Bun.which looks in the current directory for bare .cmd names (Windows)", async () => {
+  if (!isWindows) return; // POSIX does not search CWD for bare names
+  const cwd = process.cwd();
+  const dir = tempDirWithFiles("which", {
+    "some_program_name.cmd": "@echo WIN_CWD_OK\r\n@exit 0\r\n",
+  });
+  process.chdir(dir);
+  try {
+    const result = which("some_program_name");
+    expect(result).not.toBeNull();
+    expect(result!.toLowerCase()).toContain("some_program_name.cmd");
   } finally {
     process.chdir(cwd);
   }
