@@ -1072,6 +1072,26 @@ pub fn writeFileWithSourceDestination(ctx: *jsc.JSGlobalObject, source_blob: *Bl
         file_copier.schedule();
         return file_copier.promise.value();
     } else if (destination_type == .file and source_type == .s3) {
+        // Before streaming from S3, create the parent directory if needed
+        if (options.mkdirp_if_not_exists != false) {
+            const dest_file = &destination_store.data.file;
+            if (dest_file.pathlike == .path) {
+                const path_str = dest_file.pathlike.path.slice();
+                if (std.fs.path.dirname(path_str)) |dirname| {
+                    var node_fs: jsc.Node.fs.NodeFS = .{};
+                    switch (node_fs.mkdirRecursive(.{
+                        .path = .{ .string = bun.PathString.init(dirname) },
+                        .recursive = true,
+                        .always_return_none = true,
+                    })) {
+                        .err => |mkdir_err| {
+                            return jsc.JSPromise.dangerouslyCreateRejectedPromiseValueWithoutNotifyingVM(ctx, try mkdir_err.toJS(ctx));
+                        },
+                        else => {},
+                    }
+                }
+            }
+        }
         const s3 = &source_store.data.s3;
         if (try jsc.WebCore.ReadableStream.fromJS(try jsc.WebCore.ReadableStream.fromBlobCopyRef(
             ctx,
