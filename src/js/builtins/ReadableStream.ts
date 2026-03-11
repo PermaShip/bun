@@ -513,3 +513,75 @@ export function lazyAsyncIterator(this) {
   $readableStreamDefineLazyIterators(prototype);
   return prototype[globalThis.Symbol.asyncIterator].$call(this);
 }
+
+export function from(asyncIterable) {
+  // Per WHATWG Streams spec: https://streams.spec.whatwg.org/#rs-from
+
+  if (asyncIterable === null || asyncIterable === undefined) {
+    throw new TypeError("ReadableStream.from() requires an async iterable or iterable object");
+  }
+
+  // GetIterator(asyncIterable, async) — try async iterator first, then sync
+  let iter;
+
+  const asyncIteratorMethod = asyncIterable[Symbol.asyncIterator];
+  if (asyncIteratorMethod !== undefined && asyncIteratorMethod !== null) {
+    if (typeof asyncIteratorMethod !== "function") {
+      throw new TypeError("[Symbol.asyncIterator] must be a function");
+    }
+    iter = asyncIteratorMethod.$call(asyncIterable);
+  } else {
+    const syncIteratorMethod = asyncIterable[Symbol.iterator];
+    if (syncIteratorMethod !== undefined && syncIteratorMethod !== null) {
+      if (typeof syncIteratorMethod !== "function") {
+        throw new TypeError("[Symbol.iterator] must be a function");
+      }
+      const syncIter = syncIteratorMethod.$call(asyncIterable);
+      if (syncIter === null || syncIter === undefined) {
+        throw new TypeError("[Symbol.iterator]() must return an object");
+      }
+      // Wrap sync iterator as async iterator per spec CreateAsyncFromSyncIterator
+      iter = {
+        next() {
+          return Promise.$resolve(syncIter.next());
+        },
+        return(value) {
+          if (typeof syncIter.return === "function") {
+            return Promise.$resolve(syncIter.return(value));
+          }
+          return Promise.$resolve({ done: true, value: undefined });
+        },
+      };
+    } else {
+      throw new TypeError("ReadableStream.from() requires an async iterable or iterable object");
+    }
+  }
+
+  if (iter === null || iter === undefined || typeof iter.next !== "function") {
+    throw new TypeError("The async iterator must have a next() method");
+  }
+
+  return new ReadableStream({
+    pull(controller) {
+      return Promise.$resolve(iter.next()).then(function (iterResult) {
+        if (iterResult === null || typeof iterResult !== "object") {
+          throw new TypeError("The iterator.next() must return an object");
+        }
+        if (iterResult.done) {
+          controller.close();
+        } else {
+          controller.enqueue(iterResult.value);
+        }
+      });
+    },
+    cancel(reason) {
+      if (typeof iter.return === "function") {
+        return Promise.$resolve(iter.return(reason)).then(function (iterResult) {
+          if (iterResult === null || typeof iterResult !== "object") {
+            throw new TypeError("The iterator.return() must return an object");
+          }
+        });
+      }
+    },
+  });
+}
