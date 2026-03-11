@@ -878,8 +878,26 @@ fn writeFileWithEmptySourceToDestination(ctx: *jsc.JSGlobalObject, destination_b
                         if (options.mkdirp_if_not_exists == false) break :err;
                         // NOTE: if .err is PERM, it ~should~ really is a
                         // permissions issue
-                        const dirpath: []const u8 = switch (file.pathlike) {
-                            .path => |path| std.fs.path.dirname(path.slice()) orelse break :err,
+                        switch (file.pathlike) {
+                            .path => |path| {
+                                // Only run mkdirRecursive when there is an
+                                // actual directory component to create. When
+                                // dirname returns null the file is in the
+                                // current directory and no mkdir is needed —
+                                // but we still need to create the file itself.
+                                if (std.fs.path.dirname(path.slice())) |dirpath| {
+                                    const mkdir_result = node_fs.mkdirRecursive(.{
+                                        .path = .{ .string = bun.PathString.init(dirpath) },
+                                        // TODO: Do we really want .mode to be 0o777?
+                                        .recursive = true,
+                                        .always_return_none = true,
+                                    });
+                                    if (mkdir_result == .err) {
+                                        result.err = mkdir_result.err;
+                                        break :err;
+                                    }
+                                }
+                            },
                             .fd => {
                                 // NOTE: if this is an fd, it means the file
                                 // exists, so we shouldn't try to mkdir it
@@ -888,16 +906,6 @@ fn writeFileWithEmptySourceToDestination(ctx: *jsc.JSGlobalObject, destination_b
                                 if (was_eperm) result.err.errno = @intCast(@intFromEnum(bun.sys.E.PERM));
                                 break :err;
                             },
-                        };
-                        const mkdir_result = node_fs.mkdirRecursive(.{
-                            .path = .{ .string = bun.PathString.init(dirpath) },
-                            // TODO: Do we really want .mode to be 0o777?
-                            .recursive = true,
-                            .always_return_none = true,
-                        });
-                        if (mkdir_result == .err) {
-                            result.err = mkdir_result.err;
-                            break :err;
                         }
 
                         // SAFETY: we check if `file.pathlike` is an fd or
