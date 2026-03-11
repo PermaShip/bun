@@ -232,7 +232,7 @@ pub const RunCommand = struct {
         for (passthrough) |part| {
             try copy_script.append(' ');
             if (bun.shell.needsEscapeUtf8AsciiLatin1(part)) {
-                try bun.shell.escape8Bit(part, &copy_script, true);
+                try bun.shell.escapeSingleQuote(part, &copy_script);
             } else {
                 try copy_script.appendSlice(part);
             }
