@@ -195,10 +195,21 @@ pub const Shebang = struct {
         var tokenizer = std.mem.tokenizeScalar(u8, line, ' ');
         const first = tokenizer.next() orelse return parseFromBinPath(bin_path);
         if (eqlComptime(first, "/usr/bin/env") or eqlComptime(first, "/bin/env")) {
-            const rest = tokenizer.rest();
-            const program = tokenizer.next() orelse return parseFromBinPath(bin_path);
+            // Skip flags passed to env (e.g. -S, --split-string) to find the actual program.
+            // Flags always start with '-'; the first non-flag token is the interpreter name.
+            const program = prog: while (true) {
+                const token = tokenizer.next() orelse return parseFromBinPath(bin_path);
+                if (token.len > 0 and token[0] == '-') continue;
+                break :prog token;
+            };
+            const rest_after_program = tokenizer.rest();
             const is_node_or_bun = eqlComptime(program, "bun") or eqlComptime(program, "node");
-            return try Shebang.init(rest, is_node_or_bun);
+            // Build launcher as "program [program-args...]", excluding env flags.
+            const launcher = if (rest_after_program.len > 0)
+                program.ptr[0 .. @intFromPtr(rest_after_program.ptr) + rest_after_program.len - @intFromPtr(program.ptr)]
+            else
+                program;
+            return try Shebang.init(launcher, is_node_or_bun);
         }
 
         return try Shebang.init(line, false);
