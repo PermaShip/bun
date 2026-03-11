@@ -1198,6 +1198,16 @@ pub const CommandLineReporter = struct {
                     lcov_writer,
                 ) catch continue;
             }
+
+            if (comptime !reporters.text) {
+                if (opts.fail_on_low_coverage) {
+                    const fns = report.functionCoverageFraction();
+                    const lines_cov = report.linesCoverageFraction();
+                    if (fns < base_fraction.functions or lines_cov < base_fraction.lines) {
+                        failing = true;
+                    }
+                }
+            }
         }
 
         if (comptime reporters.text) {
@@ -1238,9 +1248,10 @@ pub const CommandLineReporter = struct {
             console.splatByteAll('-', max_filepath_length + 2) catch return;
             console.writeAll(Output.prettyFmt("|---------|---------|-------------------<r>\n", enable_ansi_colors)) catch return;
 
-            opts.fractions.failing = failing;
             Output.flush();
         }
+
+        opts.fractions.failing = failing;
 
         if (comptime reporters.lcov) {
             try lcov_writer.flush();
