@@ -506,7 +506,7 @@ describe.concurrent("bun run", () => {
 
       const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
 
-      expect(stderr).toBe('$ bun index.ts "\\$HOME (!)" "argument two"\n');
+      expect(stderr).toBe("$ bun index.ts '$HOME (!)' 'argument two'\n");
       expect(stdout).toEndWith("\n$HOME (!)\nargument two\n");
       expect(exitCode).toBe(0);
     }
@@ -526,7 +526,7 @@ describe.concurrent("bun run", () => {
         [
           "a echo2: $HOME (!) argument two",
           "a echo2: Exited with code 0",
-          'b echo2: $ echo "\\$HOME (!)" "argument two"',
+          "b echo2: $ echo '$HOME (!)' 'argument two'",
           "b echo2: $HOME (!) argument two",
           "b echo2: Exited with code 0",
           "",

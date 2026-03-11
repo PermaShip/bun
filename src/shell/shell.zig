@@ -4208,6 +4208,24 @@ pub fn escape8Bit(str: []const u8, outbuf: *std.array_list.Managed(u8), comptime
     if (add_quotes) try outbuf.append('\"');
 }
 
+/// Escapes a string for use as a shell argument using single-quote wrapping.
+/// Single quotes prevent all special character interpretation in POSIX shells.
+/// Embedded single quotes are handled by closing the quote, appending a
+/// backslash-escaped single quote, then resuming the single-quoted region.
+pub fn escapeSingleQuote(str: []const u8, outbuf: *std.array_list.Managed(u8)) !void {
+    try outbuf.ensureUnusedCapacity(str.len + 2);
+    try outbuf.append('\'');
+    for (str) |c| {
+        if (c == '\'') {
+            // End current single-quote region, escape the single quote, start new region
+            try outbuf.appendSlice("'\\''");
+        } else {
+            try outbuf.append(c);
+        }
+    }
+    try outbuf.append('\'');
+}
+
 pub fn escapeUtf16(str: []const u16, outbuf: *std.array_list.Managed(u8), comptime add_quotes: bool) !struct { is_invalid: bool = false } {
     if (add_quotes) try outbuf.append('"');
 
