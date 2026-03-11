@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { isArm64, isLinux, isMacOS, isMusl, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isArm64, isLinux, isMacOS, isMusl, isWindows, tempDir } from "harness";
 import { join } from "path";
+import { mkdirSync } from "node:fs";
 
 describe("Bun.build compile", () => {
   test("compile with current platform target string", async () => {
@@ -189,3 +190,58 @@ describe("compiled binary validity", () => {
 });
 
 // file command test works well
+
+describe("temp file cleanup", () => {
+  test("no .bun-build files left on success", async () => {
+    using dir = tempDir("bun-build-compile-cleanup", {
+      "main.js": `console.log("hello");`,
+    });
+
+    await using proc = Bun.spawn({
+      cmd: [bunExe(), "build", "--compile", "main.js", "--outfile", "app"],
+      env: bunEnv,
+      cwd: String(dir),
+      stderr: "pipe",
+    });
+
+    const [stdout, stderr, exitCode] = await Promise.all([
+      proc.stdout.text(),
+      proc.stderr.text(),
+      proc.exited,
+    ]);
+
+    expect(exitCode).toBe(0);
+
+    const glob = new Bun.Glob("*.bun-build");
+    const files = await Array.fromAsync(glob.scan({ cwd: String(dir), dot: true }));
+    expect(files).toHaveLength(0);
+  });
+
+  test("no .bun-build files left on failure (EISDIR)", async () => {
+    using dir = tempDir("bun-build-compile-cleanup-fail", {
+      "main.js": `console.log("hello");`,
+    });
+
+    // Create a directory where the outfile should go, causing EISDIR
+    mkdirSync(`${String(dir)}/app`);
+
+    await using proc = Bun.spawn({
+      cmd: [bunExe(), "build", "--compile", "main.js", "--outfile", "app"],
+      env: bunEnv,
+      cwd: String(dir),
+      stderr: "pipe",
+    });
+
+    const [stdout, stderr, exitCode] = await Promise.all([
+      proc.stdout.text(),
+      proc.stderr.text(),
+      proc.exited,
+    ]);
+
+    expect(exitCode).not.toBe(0);
+
+    const glob = new Bun.Glob("*.bun-build");
+    const files = await Array.fromAsync(glob.scan({ cwd: String(dir), dot: true }));
+    expect(files).toHaveLength(0);
+  });
+});
