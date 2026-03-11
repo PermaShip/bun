@@ -84,6 +84,22 @@ for (let [gcTick, label] of [
           });
         }).toThrow("no such file or directory");
       });
+
+      it("spawnSync error shows cwd path when cwd does not exist", () => {
+        const cwdPath = "/this/path/does/not/exist/bun-cwd-test";
+        let err: any;
+        try {
+          spawnSync({
+            cmd: [bunExe(), "-e", "console.log('hi')"],
+            cwd: cwdPath,
+          });
+        } catch (e) {
+          err = e;
+        }
+        expect(err).toBeInstanceOf(Error);
+        expect(err.path).toBe(cwdPath);
+        expect(err.syscall).toBe("chdir");
+      });
     });
 
     describe("spawn", () => {
@@ -528,6 +544,22 @@ for (let [gcTick, label] of [
             cwd: "./this-should-not-exist",
           });
         }).toThrow("no such file or directory");
+      });
+
+      it("spawn error shows cwd path when cwd does not exist", () => {
+        const cwdPath = "/this/path/does/not/exist/bun-cwd-test";
+        let err: any;
+        try {
+          spawn({
+            cmd: [bunExe(), "-e", "console.log('hi')"],
+            cwd: cwdPath,
+          });
+        } catch (e) {
+          err = e;
+        }
+        expect(err).toBeInstanceOf(Error);
+        expect(err.path).toBe(cwdPath);
+        expect(err.syscall).toBe("chdir");
       });
     });
   });
